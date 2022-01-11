@@ -33,7 +33,7 @@ class TodoListService
 
     public function update(TodoListData $data, int $id): void
     {
-        $task = $this->repository->findOneTaskByIdForUser($id, $data->userKey);
+        $task = $this->repository->findOneTaskWithChild($id, $data->userKey);
         if (!$task) {
             throw new RuntimeException('Task not found');
         }
@@ -41,6 +41,10 @@ class TodoListService
         $parentTask = null;
         if ($data->parentId && !$parentTask = $this->repository->findOneTaskByIdForUser($data->parentId, $data->userKey)) {
             throw new RuntimeException('Parent task not found');
+        }
+
+        if ($data->status === StatusConverter::DONE_STATUS) {
+            $this->checkChildTodoTask($task);
         }
 
         $this->process($data, $task, $parentTask);
@@ -76,13 +80,13 @@ class TodoListService
             throw new RuntimeException("Can't delete task with status DONE");
         }
 
-        $this->checkChildTask($task);
+        $this->checkChildDoneTask($task);
 
         $this->em->remove($task);
         $this->em->flush();
     }
 
-    private function checkChildTask(TodoList $list): void
+    private function checkChildDoneTask(TodoList $list): void
     {
         /** @var TodoList $subTask */
         foreach ($list->getSubTask() as $subTask) {
@@ -90,7 +94,20 @@ class TodoListService
                 throw new RuntimeException("Subtask with ID: {$subTask->getId()} cannot be deleted, because has status: {$subTask->getStatus()}");
             }
             if ($subTask->getSubTask()->count() > 0) {
-                $this->checkChildTask($subTask);
+                $this->checkChildDoneTask($subTask);
+            }
+        }
+    }
+
+    private function checkChildTodoTask(TodoList $list): void
+    {
+        /** @var TodoList $subTask */
+        foreach ($list->getSubTask() as $subTask) {
+            if (!$subTask->getBooleanStatus()) {
+                throw new RuntimeException("Subtask with ID: {$subTask->getId()} has status TODO");
+            }
+            if ($subTask->getSubTask()->count() > 0) {
+                $this->checkChildTodoTask($subTask);
             }
         }
     }
